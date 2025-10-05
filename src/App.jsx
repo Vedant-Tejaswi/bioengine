@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -30,20 +30,57 @@ const App = () => {
     }
   };
 
-  const handleSendMessage = () => {
+  const apiBase = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : 'http://localhost:8000';
+  const fileInputRef = useRef(null);
+  const [pdfFile, setPdfFile] = useState(null);
+
+  const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
-
     const newMessage = { text: inputMessage, sender: 'user' };
-    setChatMessages([...chatMessages, newMessage]);
+    setChatMessages(prev => [...prev, newMessage]);
     setInputMessage('');
-
-    setTimeout(() => {
-      const botResponse = {
-        text: "I'm your BioEngine assistant. I can help you with biological concepts, molecular structures, research papers, and much more. What would you like to explore?",
-        sender: 'bot'
-      };
+    try {
+      const tryEndpoints = [
+        { url: `${apiBase}/llm`, method: 'POST' },
+        { url: `${apiBase}/query?q=${encodeURIComponent(inputMessage)}&top_k=5`, method: 'GET' },
+        { url: `http://127.0.0.1:8000/llm`, method: 'POST' },
+        { url: `http://127.0.0.1:8000/query?q=${encodeURIComponent(inputMessage)}&top_k=5`, method: 'GET' },
+        { url: `http://localhost:8000/llm`, method: 'POST' },
+        { url: `http://localhost:8000/query?q=${encodeURIComponent(inputMessage)}&top_k=5`, method: 'GET' },
+      ];
+      let parsed = null;
+      const tried = [];
+      for (const ep of tryEndpoints) {
+        try {
+          tried.push(ep.url);
+          const r = await fetch(ep.url, ep.method === 'POST' ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: inputMessage, top_k: 5 }) } : undefined);
+          const text = await r.text();
+          if (!text) continue;
+          const t = text.trim();
+          if (t.startsWith('<')) continue;
+          try {
+            const j = JSON.parse(text);
+            parsed = j;
+            break;
+          } catch (err) {
+            continue;
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      if (!parsed) {
+        const botResponse = { text: `Error: server returned HTML or no JSON. Tried: ${tried.join(', ')}`, sender: 'bot' };
+        setChatMessages(prev => [...prev, botResponse]);
+        return;
+      }
+      const answer = parsed.answer || parsed.text || (parsed.choices && parsed.choices[0] && (parsed.choices[0].text || parsed.choices[0].message)) || 'No response';
+      const botResponse = { text: answer, sender: 'bot' };
       setChatMessages(prev => [...prev, botResponse]);
-    }, 1000);
+    } catch (e) {
+      const botResponse = { text: 'Error: ' + (e.message || e), sender: 'bot' };
+      setChatMessages(prev => [...prev, botResponse]);
+    }
   };
 
   const Footer = () => (
@@ -456,7 +493,7 @@ const App = () => {
                   Chat with BioEngine
                 </h1>
                 <div className="flex gap-4">
-                  <button className="px-4 py-2 bg-[#1a1a1a] border border-gray-700 rounded-lg hover:border-gray-600 hover:bg-[#1f1f1f] transition-all text-sm sm:text-base">
+                  <button onClick={() => fileInputRef.current && fileInputRef.current.click()} className="px-4 py-2 bg-[#1a1a1a] border border-gray-700 rounded-lg hover:border-gray-600 hover:bg-[#1f1f1f] transition-all text-sm sm:text-base">
                     Upload PDF
                   </button>
                   <button className="px-4 py-2 bg-[#1a1a1a] border border-gray-700 rounded-lg hover:border-gray-600 hover:bg-[#1f1f1f] transition-all text-sm sm:text-base">
@@ -506,6 +543,7 @@ const App = () => {
                   Send
                 </button>
               </div>
+              <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => { if (e.target.files && e.target.files[0]) setPdfFile(e.target.files[0]); }} />
             </div>
           </div>
 

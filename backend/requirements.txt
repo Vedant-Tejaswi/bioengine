@@ -1,0 +1,6 @@
+starlette
+uvicorn
+requests
+PyPDF2
+numpy
+matplotlib
